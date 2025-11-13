@@ -3,6 +3,7 @@ import random
 import datetime
 import argparse
 import sys
+from rooms_config import load_rooms
 
 def generate_random_number(start, end):
     return random.randint(start, end)
@@ -15,8 +16,9 @@ class Room:
     def toggle_light(self):
         self.light_on = not self.light_on
 
-# create rooms and add to a list or dictionary
-rooms = [Room("Living Room"), Room("Bedroom"), Room("Kitchen")]
+# Load active rooms from config file
+active_room_names = load_rooms()
+rooms = [Room(name) for name in active_room_names]
 
 # Stage 3 decision: single random bit (0 or 1)
 # We'll generate a single 0/1 with `generate_random_number(0, 1)` and
@@ -28,11 +30,20 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(description="PyLightTimers")
     p.add_argument("-i", "--interval", type=int, choices=(15, 30), default=15,
                    help="Interval size in minutes for Stage 1 (15 or 30). Default: 15")
+    p.add_argument("-c", "--config", action="store_true",
+                   help="Run room configuration UI and exit")
     return p.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
+    
+    # Handle --config flag
+    if args.config:
+        from rooms_config import run_config
+        run_config()
+        return
+    
     interval_minutes = args.interval
 
     while True:
