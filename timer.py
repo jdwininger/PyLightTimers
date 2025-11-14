@@ -3,7 +3,8 @@ import random
 import datetime
 import argparse
 import sys
-from rooms_config import load_rooms
+from config import load_config
+from weather import get_sunrise_sunset
 
 def generate_random_number(start, end):
     return random.randint(start, end)
@@ -17,7 +18,8 @@ class Room:
         self.light_on = not self.light_on
 
 # Load active rooms from config file
-active_room_names = load_rooms()
+config = load_config()
+active_room_names = config["active_rooms"]
 rooms = [Room(name) for name in active_room_names]
 
 # Stage 3 decision: single random bit (0 or 1)
@@ -31,7 +33,9 @@ def parse_args(argv=None):
     p.add_argument("-i", "--interval", type=int, choices=(15, 30), default=15,
                    help="Interval size in minutes for Stage 1 (15 or 30). Default: 15")
     p.add_argument("-c", "--config", action="store_true",
-                   help="Run room configuration UI and exit")
+                   help="Run configuration UI and exit")
+    p.add_argument("--use-sunset", action="store_true",
+                   help="Use sunset/sunrise times instead of fixed 6pm-8am window")
     return p.parse_args(argv)
 
 
@@ -40,36 +44,58 @@ def main(argv=None):
     
     # Handle --config flag
     if args.config:
-        from rooms_config import run_config
-        run_config()
+        from config import run_interactive_config
+        run_interactive_config()
         return
     
     interval_minutes = args.interval
+    use_sunset = args.use_sunset
 
     while True:
-        # Check active runtime window (start at 18:00, end at 08:00)
-        START_HOUR = 18  # 6pm
-        END_HOUR = 8     # 8am
+        # Determine active window: either fixed (6pm-8am) or dynamic (sunset-sunrise)
+        if use_sunset:
+            # Fetch sunrise/sunset times from Open-Meteo
+            weather_data = get_sunrise_sunset(
+                config["latitude"],
+                config["longitude"],
+                config["timezone"]
+            )
+            if weather_data:
+                start_time = weather_data["sunset_time"]
+                end_time = weather_data["sunrise_time"]
+                print(f"Using dynamic times: sunset={start_time}, sunrise={end_time}")
+            else:
+                print("  ! Failed to get sunrise/sunset; using default 6pm-8am")
+                start_time = datetime.time(18, 0)  # 6pm
+                end_time = datetime.time(8, 0)     # 8am
+        else:
+            start_time = datetime.time(18, 0)  # 6pm
+            end_time = datetime.time(8, 0)     # 8am
 
         def in_active_window(now=None):
             if now is None:
                 now = datetime.datetime.now()
-            hour = now.hour
+            current_time = now.time()
             # window wraps midnight when start > end
-            if START_HOUR <= END_HOUR:
-                return START_HOUR <= hour < END_HOUR
+            if start_time <= end_time:
+                return start_time <= current_time < end_time
             else:
-                return hour >= START_HOUR or hour < END_HOUR
+                return current_time >= start_time or current_time < end_time
 
         now = datetime.datetime.now()
         if not in_active_window(now):
             # compute next start datetime
-            next_start = now.replace(hour=START_HOUR, minute=0, second=0, microsecond=0)
-            if now.hour >= START_HOUR:
+            next_start = now.replace(
+                hour=start_time.hour,
+                minute=start_time.minute,
+                second=start_time.second,
+                microsecond=0
+            )
+            if now.time() >= start_time:
                 # we're after today's start -> next start is tomorrow
                 next_start += datetime.timedelta(days=1)
             seconds_to_sleep = (next_start - now).total_seconds()
-            print(f"Outside active window ({now.time()}). Sleeping until {next_start} ({int(seconds_to_sleep)}s)...")
+            print(f"Outside active window ({now.time()}). Sleeping until {next_start.time()} ({int(seconds_to_sleep)}s)...")
             time.sleep(seconds_to_sleep)
             continue
 
